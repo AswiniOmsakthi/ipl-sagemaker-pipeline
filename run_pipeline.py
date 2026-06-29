@@ -25,9 +25,11 @@ def run_pipeline():
                    .get_caller_identity()["Account"]
     bucket  = f"sagemaker-ipl-pipeline-{account}"
 
-    # ─── Read Infra Outputs from S3 ─────────────────────────
-    s3_client = boto3.client("s3", region_name=region)
+    boto_session = boto3.Session(region_name=region)
+    sm_client    = boto3.client("sagemaker", region_name=region)
+    s3_client    = boto3.client("s3",        region_name=region)
 
+    # ─── Read Infra Outputs from S3 ─────────────────────────
     try:
         response  = s3_client.get_object(
             Bucket=bucket,
@@ -44,18 +46,38 @@ def run_pipeline():
         print(f"✅ Bucket     : {bucket}")
 
     except Exception as e:
-        # Fallback to environment variable
         print(f"⚠️ S3 read failed : {str(e)}")
-        print(f"⚠️ Using fallback environment variables")
-        role = os.environ.get("AWS_ROLE_ARN")
-        print(f"✅ Role ARN   : {role}")
+        role      = os.environ.get("AWS_ROLE_ARN")
+        domain_id = os.environ.get("DOMAIN_ID", "")
+        print(f"✅ Fallback Role    : {role}")
+        print(f"✅ Fallback Domain  : {domain_id}")
 
+    # ─── Verify Studio Domain is Active ─────────────────────
+    try:
+        domain = sm_client.describe_domain(DomainId=domain_id)
+        status = domain["Status"]
+        name   = domain["DomainName"]
+        print(f"✅ Studio Domain    : {name}")
+        print(f"✅ Studio Status    : {status}")
+
+        if status != "InService":
+            raise Exception(f"Studio not ready: {status}")
+
+        print(f"✅ Studio is ready  : {domain_id}")
+
+    except Exception as e:
+        print(f"⚠️ Domain check failed: {str(e)}")
+        print(f"⚠️ Continuing with pipeline...")
+
+    # ─── Create SageMaker Session with Studio Domain ────────
     session = sagemaker.Session(
-        boto_session=boto3.Session(region_name=region)
+        boto_session=boto_session,
+        sagemaker_client=sm_client,
+        default_bucket=bucket
     )
 
-    print(f"✅ Region     : {region}")
-    print(f"✅ Bucket     : {bucket}")
+    print(f"✅ Session created for domain: {domain_id}")
+    print(f"✅ Default bucket: {bucket}")
 
     # ─── Step 1: Data Preparation ───────────────────────────
     processor = SKLearnProcessor(
@@ -219,10 +241,14 @@ def run_pipeline():
     pipeline.upsert(role_arn=role)
     execution = pipeline.start()
 
+    print(f"\n{'='*50}")
     print(f"✅ Pipeline Started!")
-    print(f"✅ Execution ARN : {execution.arn}")
-    print(f"✅ Domain ID     : {domain_id if 'domain_id' in dir() else 'N/A'}")
-    print(f"✅ Monitor here  : SageMaker → Pipelines → IPLMatchPredictionPipeline")
+    print(f"✅ Studio Domain  : {domain_id}")
+    print(f"✅ Execution ARN  : {execution.arn}")
+    print(f"✅ Monitor here   :")
+    print(f"   SageMaker Studio → {domain_id}")
+    print(f"   → Pipelines → IPLMatchPredictionPipeline")
+    print(f"{'='*50}")
 
 
 if __name__ == "__main__":

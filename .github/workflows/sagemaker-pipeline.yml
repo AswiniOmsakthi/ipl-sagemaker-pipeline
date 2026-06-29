@@ -1,15 +1,15 @@
-name: Pipeline 3 - Deploy - Deploy Model to Endpoint
+name: Pipeline 2 - ML - Train and Register Model
 
 on:
   workflow_run:
     workflows:
-      - "Pipeline 2 - ML - Train and Register Model"
+      - "Pipeline 1 - Infra - Create SageMaker Studio"
     types:
       - completed
   workflow_dispatch:
 
 jobs:
-  deploy-model:
+  run-sagemaker-pipeline:
     runs-on: ubuntu-latest
     if: >
       github.event_name == 'workflow_dispatch' ||
@@ -28,7 +28,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install "sagemaker==2.232.2"
-          pip install boto3
+          pip install boto3 scikit-learn pandas joblib
 
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v2
@@ -37,7 +37,7 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ secrets.AWS_REGION }}
 
-      - name: Read Infra Outputs from S3       # ✅ Auto read role ARN
+      - name: Read Infra Outputs from S3
         env:
           AWS_REGION: ${{ secrets.AWS_REGION }}
         run: |
@@ -50,8 +50,7 @@ jobs:
           account = boto3.client("sts", region_name=region)\
                          .get_caller_identity()["Account"]
           bucket  = f"sagemaker-ipl-pipeline-{account}"
-
-          s3 = boto3.client("s3", region_name=region)
+          s3      = boto3.client("s3", region_name=region)
 
           try:
               response = s3.get_object(
@@ -60,7 +59,6 @@ jobs:
               )
               infra = json.loads(response["Body"].read())
 
-              # ✅ Write to GitHub env automatically
               with open(os.environ["GITHUB_ENV"], "a") as f:
                   f.write(f"ROLE_ARN={infra['role_arn']}\n")
                   f.write(f"DOMAIN_ID={infra['domain_id']}\n")
@@ -71,15 +69,17 @@ jobs:
               print(f"✅ Bucket    : {infra['bucket_name']}")
 
           except Exception as e:
-              print(f"⚠️ Using fallback: {str(e)}")
+              print(f"⚠️ S3 read failed: {str(e)}")
+              print(f"⚠️ Using fallback secrets")
               with open(os.environ["GITHUB_ENV"], "a") as f:
                   f.write(f"ROLE_ARN={os.environ.get('AWS_ROLE_ARN', '')}\n")
           EOF
 
-      - name: Deploy Model to Endpoint         # ✅ Uses auto role ARN
+      - name: Run SageMaker Pipeline
         env:
-          AWS_ROLE_ARN : ${{ env.ROLE_ARN }}  # ← From Pipeline 1 output
+          AWS_ROLE_ARN : ${{ env.ROLE_ARN }}
           AWS_REGION   : ${{ secrets.AWS_REGION }}
           DOMAIN_ID    : ${{ env.DOMAIN_ID }}
+          BUCKET       : ${{ env.BUCKET }}
         run: |
-          python deploy/deploy_endpoint.py
+          python run_pipeline.py

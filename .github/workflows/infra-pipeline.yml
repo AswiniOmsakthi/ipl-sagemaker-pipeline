@@ -3,7 +3,7 @@ name: Pipeline 1 - Infra - Create SageMaker Studio
 on:
   push:
     branches:
-      - master          # ✅ Triggers first on push
+      - master
   workflow_dispatch:
 
 jobs:
