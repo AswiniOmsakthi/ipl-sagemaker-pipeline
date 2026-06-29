@@ -62,7 +62,8 @@ def run_pipeline():
         code="pipeline/preprocessing.py"
     )
 
-    # ─── Step 2: Model Training ─────────────────────────────
+    # ─── Step 2: Model Training + Metrics ───────────────────
+    # ✅ metric_definitions makes metrics appear in Pipeline UI
     estimator = SKLearn(
         entry_point="train.py",
         source_dir="pipeline",
@@ -73,7 +74,13 @@ def run_pipeline():
         use_spot_instances=True,
         max_run=3600,
         max_wait=7200,
-        sagemaker_session=session
+        sagemaker_session=session,
+        metric_definitions=[
+            {"Name": "accuracy",  "Regex": "accuracy: ([0-9\\.]+)"},
+            {"Name": "precision", "Regex": "precision: ([0-9\\.]+)"},
+            {"Name": "recall",    "Regex": "recall: ([0-9\\.]+)"},
+            {"Name": "f1_score",  "Regex": "f1_score: ([0-9\\.]+)"}
+        ]
     )
 
     train_step = TrainingStep(
@@ -96,7 +103,6 @@ def run_pipeline():
         sagemaker_session=session
     )
 
-    # PropertyFile to read metrics
     evaluation_report = PropertyFile(
         name="EvaluationReport",
         output_name="evaluation",
@@ -155,17 +161,17 @@ def run_pipeline():
             property_file=evaluation_report,
             json_path="metrics.accuracy.value"
         ),
-        right=0.60   # ✅ Threshold: 60% accuracy
+        right=0.60
     )
 
     condition_step = ConditionStep(
         name="QualityGate",
         conditions=[accuracy_condition],
-        if_steps=[register_step],   # ✅ Pass → Register
-        else_steps=[]               # ❌ Fail → Stop
+        if_steps=[register_step],
+        else_steps=[]
     )
 
-    # ─── Build Pipeline ─────────────────────────────────────
+    # ─── Build & Run ────────────────────────────────────────
     pipeline = Pipeline(
         name="IPLMatchPredictionPipeline",
         steps=[
@@ -177,7 +183,6 @@ def run_pipeline():
         sagemaker_session=session
     )
 
-    # ─── Run Pipeline ───────────────────────────────────────
     pipeline.upsert(role_arn=role)
     execution = pipeline.start()
 
