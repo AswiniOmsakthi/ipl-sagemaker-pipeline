@@ -4,6 +4,7 @@ import json
 import os
 import tarfile
 import boto3
+import sagemaker
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
 
 # ─── Paths ──────────────────────────────────────────────────
@@ -30,10 +31,18 @@ precision = precision_score(y, preds)
 recall    = recall_score(y, preds)
 f1        = f1_score(y, preds)
 
+# ─── Print Metrics ──────────────────────────────────────────
 print(f"✅ Accuracy  : {accuracy:.4f}")
 print(f"✅ Precision : {precision:.4f}")
 print(f"✅ Recall    : {recall:.4f}")
 print(f"✅ F1        : {f1:.4f}")
+
+# ─── Print in SageMaker Metrics Format ──────────────────────
+# ✅ This makes metrics appear in Pipeline Graph step panel
+print(f"[SageMaker Metrics] #quality_metric# accuracy={accuracy:.4f};")
+print(f"[SageMaker Metrics] #quality_metric# precision={precision:.4f};")
+print(f"[SageMaker Metrics] #quality_metric# recall={recall:.4f};")
+print(f"[SageMaker Metrics] #quality_metric# f1_score={f1:.4f};")
 
 # ─── Save Evaluation Report ─────────────────────────────────
 os.makedirs(output_dir, exist_ok=True)
@@ -54,18 +63,18 @@ print("✅ Evaluation report saved!")
 
 # ─── Log Metrics to SageMaker Experiments ───────────────────
 try:
-    import sagemaker
     from sagemaker.experiments.run import Run
 
-    boto_session    = boto3.Session()
+    boto_session      = boto3.Session()
     sagemaker_session = sagemaker.Session(boto_session=boto_session)
 
     with Run(
-        experiment_name = "ipl-match-prediction",
-        run_name        = "evaluation-run",
+        experiment_name   = "ipl-match-prediction",
+        run_name          = "evaluation-run",
         sagemaker_session = sagemaker_session
     ) as run:
-        # ✅ Log all metrics
+
+        # ✅ Log metrics
         run.log_metric(name="accuracy",  value=round(accuracy,  4), step=1)
         run.log_metric(name="precision", value=round(precision, 4), step=1)
         run.log_metric(name="recall",    value=round(recall,    4), step=1)
@@ -78,9 +87,9 @@ try:
         run.log_parameter("dataset",      "IPL 2008-2020")
         run.log_parameter("threshold",    "0.75")
 
-        print("✅ Metrics logged to SageMaker Experiments!")
+    print("✅ Metrics logged to SageMaker Experiments!")
 
 except Exception as e:
-    print(f"⚠️ Experiment logging skipped: {e}")
+    print(f"⚠️ Experiment logging skipped: {str(e)}")
 
 print(f"✅ Full Report : {json.dumps(report, indent=2)}")
