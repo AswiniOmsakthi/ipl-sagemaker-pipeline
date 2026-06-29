@@ -1,17 +1,17 @@
-name: Pipeline 2 - ML - Train and Register Model
+name: Pipeline 3 - Deploy - Deploy Model to Endpoint
 
 on:
-  workflow_run:                           # ✅ Waits for Pipeline 1
+  workflow_run:
     workflows:
-      - "Pipeline 1 - Infra - Create SageMaker Studio"
+      - "Pipeline 2 - ML - Train and Register Model"
     types:
-      - completed                         # ✅ Only after Pipeline 1 completes
+      - completed
   workflow_dispatch:
 
 jobs:
-  run-sagemaker-pipeline:
+  deploy-model:
     runs-on: ubuntu-latest
-    if: >                                 # ✅ Only if Pipeline 1 succeeded
+    if: >
       github.event_name == 'workflow_dispatch' ||
       github.event.workflow_run.conclusion == 'success'
 
@@ -28,7 +28,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install "sagemaker==2.232.2"
-          pip install boto3 scikit-learn pandas joblib
+          pip install boto3
 
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v2
@@ -37,9 +37,49 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ secrets.AWS_REGION }}
 
-      - name: Run SageMaker Pipeline
+      - name: Read Infra Outputs from S3       # ✅ Auto read role ARN
         env:
-          AWS_ROLE_ARN: ${{ secrets.AWS_ROLE_ARN }}
           AWS_REGION: ${{ secrets.AWS_REGION }}
         run: |
-          python run_pipeline.py
+          python - <<'EOF'
+          import boto3
+          import json
+          import os
+
+          region  = os.environ.get("AWS_REGION", "us-east-1")
+          account = boto3.client("sts", region_name=region)\
+                         .get_caller_identity()["Account"]
+          bucket  = f"sagemaker-ipl-pipeline-{account}"
+
+          s3 = boto3.client("s3", region_name=region)
+
+          try:
+              response = s3.get_object(
+                  Bucket=bucket,
+                  Key="infra/infra_outputs.json"
+              )
+              infra = json.loads(response["Body"].read())
+
+              # ✅ Write to GitHub env automatically
+              with open(os.environ["GITHUB_ENV"], "a") as f:
+                  f.write(f"ROLE_ARN={infra['role_arn']}\n")
+                  f.write(f"DOMAIN_ID={infra['domain_id']}\n")
+                  f.write(f"BUCKET={infra['bucket_name']}\n")
+
+              print(f"✅ Role ARN  : {infra['role_arn']}")
+              print(f"✅ Domain ID : {infra['domain_id']}")
+              print(f"✅ Bucket    : {infra['bucket_name']}")
+
+          except Exception as e:
+              print(f"⚠️ Using fallback: {str(e)}")
+              with open(os.environ["GITHUB_ENV"], "a") as f:
+                  f.write(f"ROLE_ARN={os.environ.get('AWS_ROLE_ARN', '')}\n")
+          EOF
+
+      - name: Deploy Model to Endpoint         # ✅ Uses auto role ARN
+        env:
+          AWS_ROLE_ARN : ${{ env.ROLE_ARN }}  # ← From Pipeline 1 output
+          AWS_REGION   : ${{ secrets.AWS_REGION }}
+          DOMAIN_ID    : ${{ env.DOMAIN_ID }}
+        run: |
+          python deploy/deploy_endpoint.py
