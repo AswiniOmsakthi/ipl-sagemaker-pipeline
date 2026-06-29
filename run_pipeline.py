@@ -1,8 +1,9 @@
-# CI/CD - GitHub Actions - IPL SageMaker Pipeline
+# Pipeline 2 - ML Pipeline - Train and Register Model
 
 import boto3
 import sagemaker
 import os
+import json
 from sagemaker.workflow.pipeline import Pipeline
 from sagemaker.workflow.steps import TrainingStep, ProcessingStep
 from sagemaker.sklearn import SKLearn, SKLearnProcessor
@@ -20,14 +21,41 @@ def run_pipeline():
 
     # ─── Setup ──────────────────────────────────────────────
     region  = os.environ.get("AWS_REGION", "us-east-1")
-    role    = os.environ.get("AWS_ROLE_ARN")
-    account = boto3.client("sts", region_name=region).get_caller_identity()["Account"]
+    account = boto3.client("sts", region_name=region)\
+                   .get_caller_identity()["Account"]
     bucket  = f"sagemaker-ipl-pipeline-{account}"
-    session = sagemaker.Session(boto_session=boto3.Session(region_name=region))
 
-    print(f"✅ Region  : {region}")
-    print(f"✅ Role    : {role}")
-    print(f"✅ Bucket  : {bucket}")
+    # ─── Read Infra Outputs from S3 ─────────────────────────
+    s3_client = boto3.client("s3", region_name=region)
+
+    try:
+        response  = s3_client.get_object(
+            Bucket=bucket,
+            Key="infra/infra_outputs.json"
+        )
+        infra     = json.loads(response["Body"].read())
+        role      = infra["role_arn"]
+        domain_id = infra["domain_id"]
+        bucket    = infra["bucket_name"]
+
+        print(f"✅ Infra outputs loaded from S3")
+        print(f"✅ Domain ID  : {domain_id}")
+        print(f"✅ Role ARN   : {role}")
+        print(f"✅ Bucket     : {bucket}")
+
+    except Exception as e:
+        # Fallback to environment variable
+        print(f"⚠️ S3 read failed : {str(e)}")
+        print(f"⚠️ Using fallback environment variables")
+        role = os.environ.get("AWS_ROLE_ARN")
+        print(f"✅ Role ARN   : {role}")
+
+    session = sagemaker.Session(
+        boto_session=boto3.Session(region_name=region)
+    )
+
+    print(f"✅ Region     : {region}")
+    print(f"✅ Bucket     : {bucket}")
 
     # ─── Step 1: Data Preparation ───────────────────────────
     processor = SKLearnProcessor(
@@ -62,8 +90,7 @@ def run_pipeline():
         code="pipeline/preprocessing.py"
     )
 
-    # ─── Step 2: Model Training + Metrics ───────────────────
-    # ✅ metric_definitions makes metrics appear in Pipeline UI
+    # ─── Step 2: Model Training ─────────────────────────────
     estimator = SKLearn(
         entry_point="train.py",
         source_dir="pipeline",
@@ -88,7 +115,9 @@ def run_pipeline():
         estimator=estimator,
         inputs={
             "train": TrainingInput(
-                s3_data=data_prep_step.properties.ProcessingOutputConfig.Outputs["train"].S3Output.S3Uri,
+                s3_data=data_prep_step.properties\
+                        .ProcessingOutputConfig\
+                        .Outputs["train"].S3Output.S3Uri,
                 content_type="text/csv"
             )
         }
@@ -114,11 +143,14 @@ def run_pipeline():
         processor=evaluator,
         inputs=[
             ProcessingInput(
-                source=train_step.properties.ModelArtifacts.S3ModelArtifacts,
+                source=train_step.properties\
+                       .ModelArtifacts.S3ModelArtifacts,
                 destination="/opt/ml/processing/model"
             ),
             ProcessingInput(
-                source=data_prep_step.properties.ProcessingOutputConfig.Outputs["test"].S3Output.S3Uri,
+                source=data_prep_step.properties\
+                       .ProcessingOutputConfig\
+                       .Outputs["test"].S3Output.S3Uri,
                 destination="/opt/ml/processing/test"
             )
         ],
@@ -144,7 +176,8 @@ def run_pipeline():
     register_step = RegisterModel(
         name="ModelRegistration",
         estimator=estimator,
-        model_data=train_step.properties.ModelArtifacts.S3ModelArtifacts,
+        model_data=train_step.properties\
+                  .ModelArtifacts.S3ModelArtifacts,
         content_types=["text/csv"],
         response_types=["text/csv"],
         inference_instances=["ml.m5.large"],
@@ -171,7 +204,7 @@ def run_pipeline():
         else_steps=[]
     )
 
-    # ─── Build & Run ────────────────────────────────────────
+    # ─── Build Pipeline ─────────────────────────────────────
     pipeline = Pipeline(
         name="IPLMatchPredictionPipeline",
         steps=[
@@ -188,6 +221,7 @@ def run_pipeline():
 
     print(f"✅ Pipeline Started!")
     print(f"✅ Execution ARN : {execution.arn}")
+    print(f"✅ Domain ID     : {domain_id if 'domain_id' in dir() else 'N/A'}")
     print(f"✅ Monitor here  : SageMaker → Pipelines → IPLMatchPredictionPipeline")
 
 
