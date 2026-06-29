@@ -40,7 +40,7 @@ def run_pipeline():
         domain_id = infra["domain_id"]
         bucket    = infra["bucket_name"]
 
-        print(f"✅ Infra outputs loaded from S3")
+        print(f"✅ Infra outputs loaded")
         print(f"✅ Domain ID  : {domain_id}")
         print(f"✅ Role ARN   : {role}")
         print(f"✅ Bucket     : {bucket}")
@@ -49,35 +49,23 @@ def run_pipeline():
         print(f"⚠️ S3 read failed : {str(e)}")
         role      = os.environ.get("AWS_ROLE_ARN")
         domain_id = os.environ.get("DOMAIN_ID", "")
-        print(f"✅ Fallback Role    : {role}")
-        print(f"✅ Fallback Domain  : {domain_id}")
+        print(f"✅ Fallback Role   : {role}")
+        print(f"✅ Fallback Domain : {domain_id}")
 
-    # ─── Verify Studio Domain is Active ─────────────────────
+    # ─── Verify New Studio Domain ───────────────────────────
     try:
         domain = sm_client.describe_domain(DomainId=domain_id)
-        status = domain["Status"]
-        name   = domain["DomainName"]
-        print(f"✅ Studio Domain    : {name}")
-        print(f"✅ Studio Status    : {status}")
-
-        if status != "InService":
-            raise Exception(f"Studio not ready: {status}")
-
-        print(f"✅ Studio is ready  : {domain_id}")
-
+        print(f"✅ Studio Name   : {domain['DomainName']}")
+        print(f"✅ Studio Status : {domain['Status']}")
     except Exception as e:
-        print(f"⚠️ Domain check failed: {str(e)}")
-        print(f"⚠️ Continuing with pipeline...")
+        print(f"⚠️ Domain check  : {str(e)}")
 
-    # ─── Create SageMaker Session with Studio Domain ────────
+    # ─── Create Session with New Studio ─────────────────────
     session = sagemaker.Session(
         boto_session=boto_session,
         sagemaker_client=sm_client,
         default_bucket=bucket
     )
-
-    print(f"✅ Session created for domain: {domain_id}")
-    print(f"✅ Default bucket: {bucket}")
 
     # ─── Step 1: Data Preparation ───────────────────────────
     processor = SKLearnProcessor(
@@ -226,9 +214,9 @@ def run_pipeline():
         else_steps=[]
     )
 
-    # ─── Build Pipeline ─────────────────────────────────────
+    # ─── Build Pipeline with NEW Name ───────────────────────
     pipeline = Pipeline(
-        name="IPLMatchPredictionPipeline",
+        name="IPLMatchPredictionPipeline-New",  # ✅ New name
         steps=[
             data_prep_step,
             train_step,
@@ -242,12 +230,10 @@ def run_pipeline():
     execution = pipeline.start()
 
     print(f"\n{'='*50}")
-    print(f"✅ Pipeline Started!")
+    print(f"✅ Pipeline Started in NEW Studio!")
     print(f"✅ Studio Domain  : {domain_id}")
+    print(f"✅ Pipeline Name  : IPLMatchPredictionPipeline-New")
     print(f"✅ Execution ARN  : {execution.arn}")
-    print(f"✅ Monitor here   :")
-    print(f"   SageMaker Studio → {domain_id}")
-    print(f"   → Pipelines → IPLMatchPredictionPipeline")
     print(f"{'='*50}")
 
 
