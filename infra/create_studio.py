@@ -16,14 +16,15 @@ def create_sagemaker_studio():
     s3_client  = boto3.client("s3",        region_name=region)
     ec2_client = boto3.client("ec2",       region_name=region)
 
-    domain_name  = "ipl-sagemaker-studio"
+    domain_name  = "ipl-sagemaker-studio-new"          # ✅ Brand new
     bucket_name  = f"sagemaker-ipl-pipeline-{account}"
     role_name    = "SageMakerStudioExecutionRole"
-    profile_name = "ipl-user"
+    profile_name = "ipl-user-new"                      # ✅ Brand new
 
-    print(f"✅ Region  : {region}")
-    print(f"✅ Account : {account}")
-    print(f"✅ Bucket  : {bucket_name}")
+    print(f"✅ Region      : {region}")
+    print(f"✅ Account     : {account}")
+    print(f"✅ Domain Name : {domain_name}")
+    print(f"✅ Bucket      : {bucket_name}")
 
     # ─── Step 1: Create S3 Bucket ───────────────────────────
     try:
@@ -92,9 +93,11 @@ def create_sagemaker_studio():
     print(f"✅ VPC      : {vpc_id}")
     print(f"✅ Subnets  : {subnet_ids}")
 
-    # ─── Step 4: Create SageMaker Studio Domain ─────────────
+    # ─── Step 4: Create Brand New Studio Domain ─────────────
     try:
         existing      = sm_client.list_domains()
+
+        # Check for new domain name specifically
         domain_exists = any(
             d["DomainName"] == domain_name
             for d in existing["Domains"]
@@ -106,9 +109,11 @@ def create_sagemaker_studio():
                 for d in existing["Domains"]
                 if d["DomainName"] == domain_name
             )
-            print(f"✅ Studio exists : {domain_id}")
+            print(f"✅ Studio already exists : {domain_id}")
 
         else:
+            print(f"⏳ Creating brand new Studio: {domain_name}")
+
             response = sm_client.create_domain(
                 DomainName=domain_name,
                 AuthMode="IAM",
@@ -129,14 +134,15 @@ def create_sagemaker_studio():
                 VpcId=vpc_id,
                 Tags=[
                     {"Key": "Project",     "Value": "IPL-Pipeline"},
-                    {"Key": "Environment", "Value": "dev"}
+                    {"Key": "Environment", "Value": "dev"},
+                    {"Key": "Version",     "Value": "new"}
                 ]
             )
 
             domain_id = response["DomainArn"].split("/")[-1]
-            print(f"✅ Studio creating : {domain_id}")
+            print(f"✅ Studio creating   : {domain_id}")
 
-            # Wait for domain to be InService
+            # Wait for InService
             print("⏳ Waiting for Studio to be InService...")
             while True:
                 status = sm_client.describe_domain(
@@ -149,7 +155,7 @@ def create_sagemaker_studio():
                     raise Exception("Domain creation failed!")
                 time.sleep(30)
 
-            print(f"✅ Studio active : {domain_id}")
+            print(f"✅ New Studio active : {domain_id}")
 
     except Exception as e:
         print(f"❌ Domain error: {str(e)}")
@@ -181,7 +187,7 @@ def create_sagemaker_studio():
     with open("infra_outputs.json", "w") as f:
         json.dump(outputs, f, indent=2)
 
-    # Save to S3 so Pipeline 2 and 3 can read it
+    # ✅ Save to S3 so Pipeline 2 reads new domain
     s3_client.put_object(
         Bucket=bucket_name,
         Key="infra/infra_outputs.json",
@@ -189,7 +195,7 @@ def create_sagemaker_studio():
     )
 
     print("\n" + "="*50)
-    print("✅ INFRA SETUP COMPLETE!")
+    print("✅ NEW STUDIO CREATED!")
     print(f"   Domain ID    : {domain_id}")
     print(f"   Domain Name  : {domain_name}")
     print(f"   Role ARN     : {role_arn}")
