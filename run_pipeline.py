@@ -192,7 +192,7 @@ def run_pipeline():
         response_types=["text/csv"],
         inference_instances=["ml.m5.large"],
         transform_instances=["ml.m5.large"],
-        model_package_group_name="IPLMatchPredictionGroup",
+        model_package_group_name="IPLMatchPredictionGroup-New",  # ✅ Fixed
         approval_status="PendingManualApproval",
         model_metrics=model_metrics
     )
@@ -214,9 +214,9 @@ def run_pipeline():
         else_steps=[]
     )
 
-    # ─── Build Pipeline with NEW Name ───────────────────────
+    # ─── Build Pipeline ─────────────────────────────────────
     pipeline = Pipeline(
-        name="IPLMatchPredictionPipeline-New",  # ✅ New name
+        name="IPLMatchPredictionPipeline-New",
         steps=[
             data_prep_step,
             train_step,
@@ -233,6 +233,7 @@ def run_pipeline():
     print(f"✅ Pipeline Started in NEW Studio!")
     print(f"✅ Studio Domain  : {domain_id}")
     print(f"✅ Pipeline Name  : IPLMatchPredictionPipeline-New")
+    print(f"✅ Group Name     : IPLMatchPredictionGroup-New")
     print(f"✅ Execution ARN  : {execution.arn}")
     print(f"{'='*50}")
 
