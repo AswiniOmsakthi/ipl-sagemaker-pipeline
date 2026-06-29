@@ -1,3 +1,4 @@
+# CI/CD Test - GitHub Actions Trigger
 import boto3
 import sagemaker
 import os
