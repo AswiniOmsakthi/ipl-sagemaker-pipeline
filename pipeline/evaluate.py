@@ -4,8 +4,15 @@ import json
 import os
 import tarfile
 import boto3
-import sagemaker
+import subprocess
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
+
+# ─── Install sagemaker inside container ─────────────────────
+try:
+    subprocess.check_call(["pip", "install", "sagemaker", "--quiet"])
+    print("✅ sagemaker installed!")
+except Exception as e:
+    print(f"⚠️ sagemaker install failed: {str(e)}")
 
 # ─── Paths ──────────────────────────────────────────────────
 model_path = "/opt/ml/processing/model/model.tar.gz"
@@ -38,7 +45,6 @@ print(f"✅ Recall    : {recall:.4f}")
 print(f"✅ F1        : {f1:.4f}")
 
 # ─── Print in SageMaker Metrics Format ──────────────────────
-# ✅ This makes metrics appear in Pipeline Graph step panel
 print(f"[SageMaker Metrics] #quality_metric# accuracy={accuracy:.4f};")
 print(f"[SageMaker Metrics] #quality_metric# precision={precision:.4f};")
 print(f"[SageMaker Metrics] #quality_metric# recall={recall:.4f};")
@@ -63,6 +69,7 @@ print("✅ Evaluation report saved!")
 
 # ─── Log Metrics to SageMaker Experiments ───────────────────
 try:
+    import sagemaker
     from sagemaker.experiments.run import Run
 
     boto_session      = boto3.Session()
@@ -73,14 +80,10 @@ try:
         run_name          = "evaluation-run",
         sagemaker_session = sagemaker_session
     ) as run:
-
-        # ✅ Log metrics
         run.log_metric(name="accuracy",  value=round(accuracy,  4), step=1)
         run.log_metric(name="precision", value=round(precision, 4), step=1)
         run.log_metric(name="recall",    value=round(recall,    4), step=1)
         run.log_metric(name="f1_score",  value=round(f1,        4), step=1)
-
-        # ✅ Log parameters
         run.log_parameter("model_type",   "RandomForestClassifier")
         run.log_parameter("n_estimators", "100")
         run.log_parameter("test_size",    "0.2")

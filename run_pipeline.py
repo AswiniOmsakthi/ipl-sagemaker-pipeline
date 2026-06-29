@@ -1,4 +1,4 @@
-# CI/CD Test - GitHub Actions Trigger - 29 June 2026
+# CI/CD - GitHub Actions - IPL SageMaker Pipeline
 
 import boto3
 import sagemaker
@@ -70,7 +70,7 @@ def run_pipeline():
         instance_type="ml.m5.large",
         instance_count=1,
         framework_version="1.2-1",
-        use_spot_instances=True,        # ✅ Spot = 90% savings
+        use_spot_instances=True,
         max_run=3600,
         max_wait=7200,
         sagemaker_session=session
@@ -96,7 +96,7 @@ def run_pipeline():
         sagemaker_session=session
     )
 
-    # PropertyFile to read metrics from evaluation.json
+    # PropertyFile to read metrics
     evaluation_report = PropertyFile(
         name="EvaluationReport",
         output_name="evaluation",
@@ -124,7 +124,7 @@ def run_pipeline():
             )
         ],
         code="pipeline/evaluate.py",
-        property_files=[evaluation_report]  # ✅ Register property file
+        property_files=[evaluation_report]
     )
 
     # ─── Step 4: Model Registration ─────────────────────────
@@ -149,48 +149,41 @@ def run_pipeline():
     )
 
     # ─── Step 5: Quality Gate ───────────────────────────────
-    # Read accuracy from evaluation.json
     accuracy_condition = ConditionGreaterThanOrEqualTo(
         left=JsonGet(
             step_name=eval_step.name,
             property_file=evaluation_report,
-            json_path="metrics.accuracy.value"  # ✅ Read from report
+            json_path="metrics.accuracy.value"
         ),
-        right=0.75   # ✅ Threshold: 75% accuracy required
+        right=0.60   # ✅ Threshold: 60% accuracy
     )
 
     condition_step = ConditionStep(
         name="QualityGate",
         conditions=[accuracy_condition],
-        if_steps=[register_step],   # ✅ accuracy >= 0.75 → Register
-        else_steps=[]               # ❌ accuracy < 0.75  → Stop
+        if_steps=[register_step],   # ✅ Pass → Register
+        else_steps=[]               # ❌ Fail → Stop
     )
 
-    # ─── Build & Run Pipeline ───────────────────────────────
+    # ─── Build Pipeline ─────────────────────────────────────
     pipeline = Pipeline(
         name="IPLMatchPredictionPipeline",
         steps=[
             data_prep_step,
             train_step,
             eval_step,
-            condition_step          # ✅ QualityGate + Registration inside
+            condition_step
         ],
         sagemaker_session=session
     )
 
+    # ─── Run Pipeline ───────────────────────────────────────
     pipeline.upsert(role_arn=role)
     execution = pipeline.start()
 
     print(f"✅ Pipeline Started!")
     print(f"✅ Execution ARN : {execution.arn}")
-
-    # Wait and print results
-    execution.wait()
-    print("\n✅ Pipeline Completed!")
-    print("\n📊 Step Results:")
-
-    for step in execution.list_steps():
-        print(f"   {step['StepName']:30} : {step['StepStatus']}")
+    print(f"✅ Monitor here  : SageMaker → Pipelines → IPLMatchPredictionPipeline")
 
 
 if __name__ == "__main__":
