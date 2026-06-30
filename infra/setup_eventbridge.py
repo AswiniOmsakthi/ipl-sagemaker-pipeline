@@ -79,7 +79,9 @@ def lambda_handler(event, context):
 
     sm_client = boto3.client("secretsmanager")
     secret    = sm_client.get_secret_value(SecretId="github-token")
-    token     = json.loads(secret["SecretString"])["GITHUB_TOKEN"]
+
+    # ✅ Token is stored as PLAINTEXT, not JSON
+    token = secret["SecretString"]
 
     repo = "AswiniOmsakthi/ipl-sagemaker-pipeline"
     url  = f"https://api.github.com/repos/{repo}/actions/workflows/deploy-pipeline.yml/dispatches"

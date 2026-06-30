@@ -3,6 +3,7 @@ import sagemaker
 import os
 import json
 import time
+from sagemaker.sklearn.model import SKLearnModel
 
 
 def deploy_model():
@@ -44,7 +45,7 @@ def deploy_model():
     # ─── Get Latest Approved Model ──────────────────────────
     try:
         model_packages = sm_client.list_model_packages(
-            ModelPackageGroupName="IPLMatchPredictionGroup-New",  # ✅ New group
+            ModelPackageGroupName="IPLMatchPredictionGroup-New",
             ModelApprovalStatus="Approved",
             SortBy="CreationTime",
             SortOrder="Descending",
@@ -65,8 +66,16 @@ def deploy_model():
             "ModelPackageSummaryList"
         ][0]["ModelPackageVersion"]
 
+        # ✅ Get actual model.tar.gz S3 path from package details
+        package_detail = sm_client.describe_model_package(
+            ModelPackageName=model_package_arn
+        )
+        model_data_url = package_detail["InferenceSpecification"]\
+                          ["Containers"][0]["ModelDataUrl"]
+
         print(f"✅ Model Package ARN     : {model_package_arn}")
         print(f"✅ Model Package Version : {model_version}")
+        print(f"✅ Model Data URL        : {model_data_url}")
 
     except Exception as e:
         print(f"❌ Model fetch error: {str(e)}")
@@ -79,14 +88,20 @@ def deploy_model():
         default_bucket=bucket
     )
 
-    # ─── Create Model ────────────────────────────────────────
+    # ─── Create Model WITH Inference Entry Point ────────────
     model_name    = f"ipl-match-predictor-{int(time.time())}"
     endpoint_name = "ipl-match-predictor-endpoint"
 
     try:
-        model = sagemaker.ModelPackage(
+        # ✅ SKLearnModel with explicit entry_point sets
+        # SAGEMAKER_PROGRAM correctly so the container can
+        # find model_fn() for serving predictions
+        model = SKLearnModel(
+            model_data=model_data_url,
             role=role,
-            model_package_arn=model_package_arn,
+            entry_point="train.py",
+            source_dir="pipeline",
+            framework_version="1.2-1",
             sagemaker_session=session,
             name=model_name
         )
@@ -96,7 +111,7 @@ def deploy_model():
         print(f"❌ Model creation error: {str(e)}")
         raise
 
-    # ─── Check if Endpoint Exists ───────────────────────────
+    # ─── Delete Old Endpoint if Exists, Then Create Fresh ───
     try:
         existing        = sm_client.describe_endpoint(
             EndpointName=endpoint_name
@@ -105,31 +120,27 @@ def deploy_model():
         print(f"✅ Endpoint exists : {endpoint_name}")
         print(f"✅ Status          : {endpoint_status}")
 
-        # Create new endpoint config
-        config_name = f"ipl-endpoint-config-{int(time.time())}"
+        print(f"⏳ Deleting old endpoint to recreate cleanly...")
+        sm_client.delete_endpoint(EndpointName=endpoint_name)
 
-        sm_client.create_endpoint_config(
-            EndpointConfigName=config_name,
-            ProductionVariants=[
-                {
-                    "VariantName"         : "AllTraffic",
-                    "ModelName"           : model_name,
-                    "InitialInstanceCount": 1,
-                    "InstanceType"        : "ml.m5.large",
-                    "InitialVariantWeight": 1
-                }
-            ]
-        )
+        while True:
+            try:
+                sm_client.describe_endpoint(EndpointName=endpoint_name)
+                time.sleep(10)
+            except sm_client.exceptions.ClientError:
+                break
 
-        # Update existing endpoint
-        sm_client.update_endpoint(
-            EndpointName=endpoint_name,
-            EndpointConfigName=config_name
+        print(f"✅ Old endpoint deleted")
+
+        model.deploy(
+            initial_instance_count=1,
+            instance_type="ml.m5.large",
+            endpoint_name=endpoint_name,
+            wait=False
         )
-        print(f"✅ Endpoint update started!")
+        print(f"✅ Endpoint recreation started!")
 
     except sm_client.exceptions.ClientError:
-        # Endpoint does not exist — create new
         print(f"⏳ Creating new endpoint: {endpoint_name}")
 
         model.deploy(
@@ -153,7 +164,8 @@ def deploy_model():
         if status == "InService":
             break
         elif status in ["Failed", "OutOfService"]:
-            raise Exception(f"Endpoint failed: {status}")
+            detail = sm_client.describe_endpoint(EndpointName=endpoint_name)
+            raise Exception(f"Endpoint failed: {detail.get('FailureReason', status)}")
 
         time.sleep(30)
 
@@ -162,7 +174,6 @@ def deploy_model():
     # ─── Test Endpoint ───────────────────────────────────────
     print(f"\n⏳ Testing endpoint...")
 
-    # team1_won_toss, toss_bat, win_by_runs, win_by_wickets
     test_cases = [
         ("1,1,0,6",   "Team won toss + bat + won by 6 wickets"),
         ("0,0,0,0",   "Team lost toss + field + no result"),
@@ -206,9 +217,7 @@ def deploy_model():
     print(f"   Endpoint    : {endpoint_name}")
     print(f"   Model       : {model_name}")
     print(f"   Version     : {model_version}")
-    print(f"   Group       : IPLMatchPredictionGroup-New")
     print(f"   Status      : InService ✅")
-    print(f"   Domain      : {domain_id}")
     print("="*50)
 
     return deploy_outputs
