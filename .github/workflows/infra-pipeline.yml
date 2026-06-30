@@ -37,6 +37,12 @@ jobs:
         run: |
           python infra/create_studio.py
 
+      - name: Setup Auto Deploy Trigger
+        env:
+          AWS_REGION: ${{ secrets.AWS_REGION }}
+        run: |
+          python infra/setup_eventbridge.py
+
       - name: Show Infra Outputs
         run: |
           echo "✅ Infrastructure outputs:"
