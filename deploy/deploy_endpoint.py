@@ -66,7 +66,6 @@ def deploy_model():
             "ModelPackageSummaryList"
         ][0]["ModelPackageVersion"]
 
-        # ✅ Get actual model.tar.gz S3 path from package details
         package_detail = sm_client.describe_model_package(
             ModelPackageName=model_package_arn
         )
@@ -91,11 +90,9 @@ def deploy_model():
     # ─── Create Model WITH Inference Entry Point ────────────
     model_name    = f"ipl-match-predictor-{int(time.time())}"
     endpoint_name = "ipl-match-predictor-endpoint"
+    config_name   = f"ipl-endpoint-config-{int(time.time())}"  # ✅ Unique
 
     try:
-        # ✅ SKLearnModel with explicit entry_point sets
-        # SAGEMAKER_PROGRAM correctly so the container can
-        # find model_fn() for serving predictions
         model = SKLearnModel(
             model_data=model_data_url,
             role=role,
@@ -111,7 +108,7 @@ def deploy_model():
         print(f"❌ Model creation error: {str(e)}")
         raise
 
-    # ─── Delete Old Endpoint if Exists, Then Create Fresh ───
+    # ─── Delete Old Endpoint + Config if Exists ─────────────
     try:
         existing        = sm_client.describe_endpoint(
             EndpointName=endpoint_name
@@ -120,7 +117,7 @@ def deploy_model():
         print(f"✅ Endpoint exists : {endpoint_name}")
         print(f"✅ Status          : {endpoint_status}")
 
-        print(f"⏳ Deleting old endpoint to recreate cleanly...")
+        print(f"⏳ Deleting old endpoint...")
         sm_client.delete_endpoint(EndpointName=endpoint_name)
 
         while True:
@@ -129,27 +126,52 @@ def deploy_model():
                 time.sleep(10)
             except sm_client.exceptions.ClientError:
                 break
-
         print(f"✅ Old endpoint deleted")
 
-        model.deploy(
-            initial_instance_count=1,
-            instance_type="ml.m5.large",
-            endpoint_name=endpoint_name,
-            wait=False
-        )
-        print(f"✅ Endpoint recreation started!")
-
     except sm_client.exceptions.ClientError:
-        print(f"⏳ Creating new endpoint: {endpoint_name}")
+        print(f"⏳ No existing endpoint found, creating fresh one")
 
-        model.deploy(
-            initial_instance_count=1,
-            instance_type="ml.m5.large",
-            endpoint_name=endpoint_name,
-            wait=False
+    # ─── Delete Old Endpoint Configs (any leftover ones) ────
+    try:
+        configs = sm_client.list_endpoint_configs(
+            NameContains="ipl-endpoint-config"
         )
-        print(f"✅ Endpoint creation started!")
+        for cfg in configs.get("EndpointConfigs", []):
+            try:
+                sm_client.delete_endpoint_config(
+                    EndpointConfigName=cfg["EndpointConfigName"]
+                )
+                print(f"✅ Deleted old config: {cfg['EndpointConfigName']}")
+            except Exception:
+                pass
+    except Exception as e:
+        print(f"⚠️ Config cleanup skipped: {str(e)}")
+
+    # ─── Create Model in SageMaker ──────────────────────────
+    model.create(instance_type="ml.m5.large")
+    print(f"✅ Model created in SageMaker")
+
+    # ─── Create New Endpoint Config ─────────────────────────
+    sm_client.create_endpoint_config(
+        EndpointConfigName=config_name,
+        ProductionVariants=[
+            {
+                "VariantName"         : "AllTraffic",
+                "ModelName"           : model_name,
+                "InitialInstanceCount": 1,
+                "InstanceType"        : "ml.m5.large",
+                "InitialVariantWeight": 1
+            }
+        ]
+    )
+    print(f"✅ Endpoint config created : {config_name}")
+
+    # ─── Create Endpoint ─────────────────────────────────────
+    sm_client.create_endpoint(
+        EndpointName=endpoint_name,
+        EndpointConfigName=config_name
+    )
+    print(f"✅ Endpoint creation started!")
 
     # ─── Wait for Endpoint InService ────────────────────────
     print(f"⏳ Waiting for endpoint to be InService...")
